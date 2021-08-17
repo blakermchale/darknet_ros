@@ -1,95 +1,95 @@
-cmake_minimum_required(VERSION 3.5.1)
+cmake_minimum_required(VERSION 3.5)
 project(darknet_ros)
 
-# Set c++11 cmake flags
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_C_FLAGS "-Wall -Wno-unused-result -Wno-unknown-pragmas -Wno-unused-variable -Wfatal-errors -fPIC ${CMAKE_C_FLAGS}")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CMakeDependentOption)
 
 enable_language(C)
 enable_language(CXX)
 
 # Define path of darknet folder here.
+set(CMAKE_CXX_STANDARD 17)
+
+# USER SETTINGS =================================================================
+
+set(CUDA_ENABLE OFF)
+set(CUDNN_ENABLE OFF) #  set(CUDNN_ENABLE ON)
+set(FP16_ENABLE OFF)
+
+# Jetson AGX Xavier & TITAN V is under version of Turing. So, please set manually.
+# Turing or Ampere GPUs, FP16 is automatically enabled.
+
+# set(CMAKE_CUDA_ARCHITECTURES 72)
+
+
+# Define path of darknet folder here. ===========================================
 find_path(DARKNET_PATH
   NAMES "README.md"
   HINTS "${CMAKE_CURRENT_SOURCE_DIR}/../darknet/")
 message(STATUS "Darknet path dir = ${DARKNET_PATH}")
 add_definitions(-DDARKNET_FILE_PATH="${DARKNET_PATH}")
 
-#Darknet extra modules
-set(CMAKE_MODULE_PATH "${DARKNET_PATH}/cmake/Modules/" ${CMAKE_MODULE_PATH})
-
-# Find CUDA
-find_package(CUDA QUIET)
+# Find CUDA ====================================================================
+if(CUDA_ENABLE)
+  find_package(CUDA REQUIRED)
+endif()
 
 if (CUDA_FOUND)
-  # Get CUDA Compute capability with modified script from internet
-  set(CUDAFILE ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_cuda.cu)
-  set(OUTPUTFILE ${CMAKE_CURRENT_SOURCE_DIR}/scripts/cuda_check) 
-  # Compile cuda arch check script
-  execute_process(COMMAND nvcc -lcuda ${CUDAFILE} -o ${OUTPUTFILE})
-  execute_process(COMMAND ${OUTPUTFILE}
-                  RESULT_VARIABLE CUDA_RETURN_CODE
-                  OUTPUT_VARIABLE GENCODE)
-  #Check correct architectures and capabilities
-  if(${CUDA_RETURN_CODE} EQUAL 0)
-    set(CUDA_SUCCESS "TRUE")
-  else()
-    message(Warning"${GENCODE}. Forcing darknet_ros without CUDA")
-    set(CUDA_SUCCESS "FALSE")
-  endif()
-  #remove cuda_check binary
-  execute_process(COMMAND rm -f ${OUTPUTFILE})
-  #Config CUDA
-  if (${CUDA_SUCCESS})
-    set(
-      CUDA_NVCC_FLAGS
-      ${CUDA_NVCC_FLAGS};
-      -O3
-      #-gencode arch=compute_30,code=sm_30  deprecated for CUDA9+
-      #-gencode arch=compute_35,code=sm_35  deprecated for CUDA9+
-      # -gencode arch=compute_50,code=[sm_50,compute_50]
-      # -gencode arch=compute_52,code=[sm_52,compute_52]
-      # -gencode arch=compute_61,code=sm_61
-      # -gencode arch=compute_62,code=sm_62
-      ${GENCODE}       # Force to compile to installed GPUs Architectures 
-    )
-    message(STATUS "CUDA Architecture: ${GENCODE}")
-    message(STATUS "CUDA Version: ${CUDA_VERSION_STRING}")
-    message(STATUS "CUDA Version: ${CUDA_VERSION_STRINGS}")
-    message(STATUS "CUDA Libararies: ${CUDA_LIBRARIES}")
-    add_definitions(-DGPU)
-  else()
-    list(APPEND LIBRARIES "m")
-  endif()
-else()
-  list(APPEND LIBRARIES "m")
+  message(STATUS "CUDA Version: ${CUDA_VERSION_STRINGS}")
+  message(STATUS "CUDA Libararies: ${CUDA_LIBRARIES}")
+  set(
+    CUDA_NVCC_FLAGS
+    ${CUDA_NVCC_FLAGS};
+    -O3
+    -gencode arch=compute_50,code=[sm_50,compute_50]
+    -gencode arch=compute_52,code=[sm_52,compute_52]
+    -gencode arch=compute_61,code=[sm_61,compute_61]
+    -gencode arch=compute_72,code=[sm_72,compute_72] # Jetson AGX Xavier or TITAN V
+    -gencode arch=compute_75,code=[sm_75,compute_75]
+    # -gencode arch=compute_86,code=[sm_86,compute_86] # GeForce RTX 3000 Series
+  )
+  add_definitions(-DGPU)
 endif()
 
-# Find CUDNN
-if(CUDA_SUCCESS)
+# Find CUDNN =======================================================================
+
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../darknet/cmake/Modules/" ${CMAKE_MODULE_PATH})
+
+if(CUDNN_ENABLE)
   find_package(CUDNN)
-  if (CUDNN_FOUND)
-    message(STATUS "CUDNN Version: ${CUDNN_VERSION_STRINGS}")
-    message(STATUS "CUDNN Libararies: ${CUDNN_LIBRARIES}")
-    set(ADDITIONAL_CXX_FLAGS "${ADDITIONAL_CXX_FLAGS} -DCUDNN")
-  # ENABLE CUDNN_HALF
-    if ( "-gencode arch=compute_70,code=sm_70" IN_LIST CUDA_NVCC_FLAGS OR
-        "-gencode arch=compute_72,code=sm_72" IN_LIST CUDA_NVCC_FLAGS OR
-        "-gencode arch=compute_75,code=sm_75" IN_LIST CUDA_NVCC_FLAGS OR
-        "-gencode arch=compute_80,code=sm_80" IN_LIST CUDA_NVCC_FLAGS OR
-        "-gencode arch=compute_86,code=sm_86" IN_LIST CUDA_NVCC_FLAGS)
-      set(ENABLE_CUDNN_HALF "TRUE" CACHE BOOL "Enable CUDNN Half precision" FORCE)
-      message(STATUS "Your setup supports half precision (CUDA_ARCHITECTURES >= 70)")
-    else()
-      set(ENABLE_CUDNN_HALF "FALSE" CACHE BOOL "Enable CUDNN Half precision" FORCE)
-      message(STATUS "Your setup does not support half precision (it requires CUDA_ARCHITECTURES >= 70)")
-    endif()
-  endif()
+  message(STATUS "cuDNN Version: ${CUDNN_VERSION_STRINGS}")
+  message(STATUS "cuDNN Libararies: ${CUDNN_LIBRARIES}")
 endif()
 
+if(CUDNN_FOUND)
+    set(ADDITIONAL_CXX_FLAGS "${ADDITIONAL_CXX_FLAGS} -DCUDNN")
+endif()
 
-# Find X11
+execute_process (
+    COMMAND bash -c "lspci | grep NVIDIA | grep -e TU106 -e TU104 -e TU102 -e GA106 -e GA104 -e GA102"
+    OUTPUT_VARIABLE outVar
+)
+message ( STATUS " GPU (FP16): " ${outVar} )
+if(outVar AND FP16_ENABLE)
+  set(CMAKE_CUDA_ARCHITECTURES 75)
+endif()
+
+if ( 70 IN_LIST CMAKE_CUDA_ARCHITECTURES OR
+     72 IN_LIST CMAKE_CUDA_ARCHITECTURES OR
+     75 IN_LIST CMAKE_CUDA_ARCHITECTURES OR
+     80 IN_LIST CMAKE_CUDA_ARCHITECTURES OR
+     86 IN_LIST CMAKE_CUDA_ARCHITECTURES)
+  set(ENABLE_CUDNN_HALF "TRUE" CACHE BOOL "Enable CUDNN Half precision" FORCE)
+  message(STATUS "Your setup supports half precision (CUDA_ARCHITECTURES >= 70)")
+else()
+  set(ENABLE_CUDNN_HALF "FALSE" CACHE BOOL "Enable CUDNN Half precision" FORCE)
+  message(STATUS "Your setup does not support half precision (it requires CUDA_ARCHITECTURES >= 70)")
+endif()
+
+# else()
+#   list(APPEND LIBRARIES "m")
+# endif()
+
+# Find X11 ============================================================================
 message ( STATUS "Searching for X11..." )
 find_package ( X11 REQUIRED )
 if ( X11_FOUND )
@@ -100,23 +100,34 @@ if ( X11_FOUND )
 endif ( X11_FOUND )
 
 # Find rquired packeges
-find_package(Boost REQUIRED COMPONENTS thread)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
-find_package(catkin REQUIRED
-  COMPONENTS
-    cv_bridge
-    roscpp
-    rospy
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclpy REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(darknet_ros_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+
+set(dependencies
+    rclcpp
+    rclpy
+    rclcpp_action
     std_msgs
-    actionlib
-    darknet_ros_msgs
     image_transport
-    nodelet
+    cv_bridge
+    sensor_msgs
+    darknet_ros_msgs
+    ament_index_cpp
 )
 
 # Enable OPENCV in darknet
-add_definitions(-DOPENCV)
+# add_definitions(-DOPENCV)
 add_definitions(-O4 -g)
 
 # Enable CUDNN in darknet
@@ -151,7 +162,6 @@ include_directories(
   ${DARKNET_PATH}/include
   ${DARKNET_PATH}/3rdparty/stb/include
   include
-  ${Boost_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
 
@@ -208,7 +218,9 @@ set(DARKNET_CUDA_FILES
     ${DARKNET_PATH}/src/network_kernels.cu
 )
 
-if (CUDA_SUCCESS)
+set_source_files_properties(${PROJECT_LIB_FILES} PROPERTIES LANGUAGE CXX)
+
+if (CUDA_FOUND)
 
   link_directories(
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64
@@ -218,13 +230,42 @@ if (CUDA_SUCCESS)
     ${PROJECT_LIB_FILES} ${DARKNET_CORE_FILES}
     ${DARKNET_CUDA_FILES}
   )
+  
+  ament_target_dependencies(${PROJECT_NAME}_lib ${dependencies})
 
-  target_link_libraries(${PROJECT_NAME}_lib
-    cuda
-    cudart
-    cublas
-    curand
-  )
+  if(CUDNN_FOUND)
+    if(ENABLE_CUDNN_HALF)
+      target_link_libraries(${PROJECT_NAME}_lib
+        cuda
+        cudart
+        cublas
+        curand
+        CuDNN::CuDNN
+      )
+      target_compile_definitions(${PROJECT_NAME}_lib PRIVATE
+        -DCUDNN
+        -DCUDNN_HALF
+      )
+    else()
+      target_link_libraries(${PROJECT_NAME}_lib
+        cuda
+        cudart
+        cublas
+        curand
+        CuDNN::CuDNN
+      )
+      target_compile_definitions(${PROJECT_NAME}_lib PRIVATE
+        -DCUDNN
+      )
+    endif()
+  else()
+    target_link_libraries(${PROJECT_NAME}_lib
+      cuda
+      cudart
+      cublas
+      curand
+    )
+  endif()
 
   if(CUDNN_FOUND)
     target_link_libraries(${PROJECT_NAME}_lib CuDNN::CuDNN)
@@ -237,84 +278,91 @@ if (CUDA_SUCCESS)
   cuda_add_executable(${PROJECT_NAME}
     src/yolo_object_detector_node.cpp
   )
-
-  cuda_add_library(${PROJECT_NAME}_nodelet
-    src/yolo_object_detector_nodelet.cpp
-  )
+  
+ament_target_dependencies(${PROJECT_NAME} ${dependencies})
 
 else()
 
   add_library(${PROJECT_NAME}_lib
-    ${PROJECT_LIB_FILES} ${DARKNET_CORE_FILES}
+    ${PROJECT_LIB_FILES}
+    ${DARKNET_CORE_FILES}
   )
+  ament_target_dependencies(${PROJECT_NAME}_lib ${dependencies})
+  target_compile_definitions(${PROJECT_NAME}_lib PRIVATE -DOPENCV)
 
   add_executable(${PROJECT_NAME}
     src/yolo_object_detector_node.cpp
   )
+  ament_target_dependencies(${PROJECT_NAME} ${dependencies})
 
-  add_library(${PROJECT_NAME}_nodelet
-    src/yolo_object_detector_nodelet.cpp
-  )
+endif()
 
+find_package(OpenMP)
+
+if (OPENMP_FOUND)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 endif()
 
 target_link_libraries(${PROJECT_NAME}_lib
   m
   pthread
   stdc++
-  ${Boost_LIBRARIES}
   ${OpenCV_LIBRARIES}
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
+target_compile_definitions(${PROJECT_NAME}_lib PRIVATE -DOPENCV)
 
 target_link_libraries(${PROJECT_NAME}
   ${PROJECT_NAME}_lib
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE -DOPENCV)
 
-target_link_libraries(${PROJECT_NAME}_nodelet
-  ${PROJECT_NAME}_lib
+install(TARGETS ${PROJECT_NAME}_lib ${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
-add_dependencies(${PROJECT_NAME}_lib
-  darknet_ros_msgs_generate_messages_cpp
-)
-
-install(TARGETS ${PROJECT_NAME}_lib
-  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
-
-install(TARGETS ${PROJECT_NAME}
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
 
 install(
-  DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  DIRECTORY include/
+  DESTINATION include/
   FILES_MATCHING PATTERN "*.h"
-)
-
-install(DIRECTORY config launch yolo_network_config
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
 # Download yolov2-tiny.weights
 set(PATH "${CMAKE_CURRENT_SOURCE_DIR}/yolo_network_config/weights")
-set(FILE "${PATH}/yolov2-tiny.weights")
-message(STATUS "Checking and downloading yolov2-tiny.weights if needed ...")
+# set(FILE "${PATH}/yolov2-tiny.weights")
+# message(STATUS "Checking and downloading yolov2-tiny.weights if needed ...")
+# if (NOT EXISTS "${FILE}")
+#   message(STATUS "... file does not exist. Downloading now ...")
+#   execute_process(COMMAND wget http://pjreddie.com/media/files/yolov2-tiny.weights -P ${PATH})
+# endif()
+
+# # Download yolov3.weights
+# set(FILE "${PATH}/yolov3.weights")
+# message(STATUS "Checking and downloading yolov3.weights if needed ...")
+# if (NOT EXISTS "${FILE}")
+#   message(STATUS "... file does not exist. Downloading now ...")
+#   execute_process(COMMAND wget http://pjreddie.com/media/files/yolov3.weights -P ${PATH})
+# endif()
+
+# # Download yolov4.weights
+set(FILE "${PATH}/yolov4.weights")
+message(STATUS "Checking and downloading yolov4.weights if needed ...")
 if (NOT EXISTS "${FILE}")
   message(STATUS "... file does not exist. Downloading now ...")
-  execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov2-tiny.weights -P ${PATH})
+  execute_process(COMMAND wget -q https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v3_optimal/yolov4.weights -P ${PATH})
 endif()
 
-# Download yolov3.weights
-set(FILE "${PATH}/yolov3.weights")
-message(STATUS "Checking and downloading yolov3.weights if needed ...")
+# Download yolov4-tiny.weights
+set(FILE "${PATH}/yolov4-tiny.weights")
+message(STATUS "Checking and downloading yolov4-tiny.weights if needed ...")
 if (NOT EXISTS "${FILE}")
   message(STATUS "... file does not exist. Downloading now ...")
-  execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov3.weights -P ${PATH})
+  execute_process(COMMAND wget -q https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v4_pre/yolov4-tiny.weights -P ${PATH})
 endif()
 
 #Download yolov4.weights
@@ -330,28 +378,13 @@ endif()
 ## Testing ##
 #############
 
-if(CATKIN_ENABLE_TESTING)
-  # Download yolov2.weights
-  set(PATH "${CMAKE_CURRENT_SOURCE_DIR}/yolo_network_config/weights")
-  set(FILE "${PATH}/yolov2.weights")
-  message(STATUS "Checking and downloading yolov2.weights if needed ...")
-  if (NOT EXISTS "${FILE}")
-    message(STATUS "... file does not exist. Downloading now ...")
-    execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov2.weights -P ${PATH})
-  endif()
 
-  find_package(rostest REQUIRED)
+install(DIRECTORY yolo_network_config/cfg yolo_network_config/weights DESTINATION share/${PROJECT_NAME}/yolo_network_config/)
+install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME}/)
 
-  # Object detection in images.
-  add_rostest_gtest(${PROJECT_NAME}_object_detection-test
-    test/object_detection.test
-    test/test_main.cpp
-    test/ObjectDetection.cpp
-  )
-  target_link_libraries(${PROJECT_NAME}_object_detection-test
-    ${catkin_LIBRARIES}
-  )
-endif()
+#############
+## Testing ##
+#############
 
 #########################
 ###   CLANG TOOLING   ###

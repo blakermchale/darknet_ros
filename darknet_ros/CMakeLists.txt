@@ -1,17 +1,28 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.5.1)
 project(darknet_ros)
 
-include(CMakeDependentOption)
+# Set c++11 cmake flags
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_FLAGS "-Wall -Wno-unused-result -Wno-unknown-pragmas -Wno-unused-variable -Wfatal-errors -fPIC ${CMAKE_C_FLAGS}")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 enable_language(C)
 enable_language(CXX)
 
 # Define path of darknet folder here.
-set(CMAKE_CXX_STANDARD 17)
+find_path(DARKNET_PATH
+  NAMES "README.md"
+  HINTS "${CMAKE_CURRENT_SOURCE_DIR}/../darknet/")
+message(STATUS "Darknet path dir = ${DARKNET_PATH}")
+add_definitions(-DDARKNET_FILE_PATH="${DARKNET_PATH}")
+
+#Darknet extra modules
+set(CMAKE_MODULE_PATH "${DARKNET_PATH}/cmake/Modules/" ${CMAKE_MODULE_PATH})
+
 
 # USER SETTINGS =================================================================
 
-set(CUDA_ENABLE OFF)
+set(CUDA_ENABLE ON)
 set(CUDNN_ENABLE OFF) #  set(CUDNN_ENABLE ON)
 set(FP16_ENABLE OFF)
 
@@ -19,14 +30,6 @@ set(FP16_ENABLE OFF)
 # Turing or Ampere GPUs, FP16 is automatically enabled.
 
 # set(CMAKE_CUDA_ARCHITECTURES 72)
-
-
-# Define path of darknet folder here. ===========================================
-find_path(DARKNET_PATH
-  NAMES "README.md"
-  HINTS "${CMAKE_CURRENT_SOURCE_DIR}/../darknet/")
-message(STATUS "Darknet path dir = ${DARKNET_PATH}")
-add_definitions(-DDARKNET_FILE_PATH="${DARKNET_PATH}")
 
 # Find CUDA ====================================================================
 if(CUDA_ENABLE)
@@ -49,7 +52,6 @@ if (CUDA_FOUND)
   )
   add_definitions(-DGPU)
 endif()
-
 # Find CUDNN =======================================================================
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../darknet/cmake/Modules/" ${CMAKE_MODULE_PATH})
@@ -100,34 +102,23 @@ if ( X11_FOUND )
 endif ( X11_FOUND )
 
 # Find rquired packeges
+find_package(Boost REQUIRED COMPONENTS thread)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
-
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rclpy REQUIRED)
-find_package(rclcpp_action REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(image_transport REQUIRED)
-find_package(cv_bridge REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(darknet_ros_msgs REQUIRED)
-find_package(ament_index_cpp REQUIRED)
-
-set(dependencies
-    rclcpp
-    rclpy
-    rclcpp_action
-    std_msgs
-    image_transport
+find_package(catkin REQUIRED
+  COMPONENTS
     cv_bridge
-    sensor_msgs
+    roscpp
+    rospy
+    std_msgs
+    actionlib
     darknet_ros_msgs
-    ament_index_cpp
+    image_transport
+    # nodelet
 )
 
 # Enable OPENCV in darknet
-# add_definitions(-DOPENCV)
+add_definitions(-DOPENCV)
 add_definitions(-O4 -g)
 
 # Enable CUDNN in darknet
@@ -152,7 +143,7 @@ catkin_package(
     std_msgs
     darknet_ros_msgs
     image_transport
-    nodelet
+    # nodelet
   DEPENDS
     Boost
 )
@@ -162,6 +153,7 @@ include_directories(
   ${DARKNET_PATH}/include
   ${DARKNET_PATH}/3rdparty/stb/include
   include
+  ${Boost_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
 
@@ -231,8 +223,6 @@ if (CUDA_FOUND)
     ${DARKNET_CUDA_FILES}
   )
   
-  ament_target_dependencies(${PROJECT_NAME}_lib ${dependencies})
-
   if(CUDNN_FOUND)
     if(ENABLE_CUDNN_HALF)
       target_link_libraries(${PROJECT_NAME}_lib
@@ -267,102 +257,83 @@ if (CUDA_FOUND)
     )
   endif()
 
-  if(CUDNN_FOUND)
-    target_link_libraries(${PROJECT_NAME}_lib CuDNN::CuDNN)
-    target_compile_definitions(${PROJECT_NAME}_lib PUBLIC -DCUDNN)
-    if(ENABLE_CUDNN_HALF)
-      target_compile_definitions(${PROJECT_NAME}_lib PUBLIC -DCUDNN_HALF)
-    endif()
-  endif()
-
   cuda_add_executable(${PROJECT_NAME}
     src/yolo_object_detector_node.cpp
   )
-  
-ament_target_dependencies(${PROJECT_NAME} ${dependencies})
 
 else()
 
   add_library(${PROJECT_NAME}_lib
-    ${PROJECT_LIB_FILES}
-    ${DARKNET_CORE_FILES}
+    ${PROJECT_LIB_FILES} ${DARKNET_CORE_FILES}
   )
-  ament_target_dependencies(${PROJECT_NAME}_lib ${dependencies})
-  target_compile_definitions(${PROJECT_NAME}_lib PRIVATE -DOPENCV)
 
   add_executable(${PROJECT_NAME}
     src/yolo_object_detector_node.cpp
   )
-  ament_target_dependencies(${PROJECT_NAME} ${dependencies})
 
-endif()
+  # add_library(${PROJECT_NAME}_nodelet
+  #   src/yolo_object_detector_nodelet.cpp
+  # )
 
-find_package(OpenMP)
-
-if (OPENMP_FOUND)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 endif()
 
 target_link_libraries(${PROJECT_NAME}_lib
   m
   pthread
   stdc++
+  ${Boost_LIBRARIES}
   ${OpenCV_LIBRARIES}
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
-target_compile_definitions(${PROJECT_NAME}_lib PRIVATE -DOPENCV)
 
 target_link_libraries(${PROJECT_NAME}
   ${PROJECT_NAME}_lib
 )
-target_compile_definitions(${PROJECT_NAME} PRIVATE -DOPENCV)
 
-install(TARGETS ${PROJECT_NAME}_lib ${PROJECT_NAME}
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION lib/${PROJECT_NAME}
+# target_link_libraries(${PROJECT_NAME}_nodelet
+#   ${PROJECT_NAME}_lib
+# )
+
+add_dependencies(${PROJECT_NAME}_lib
+  darknet_ros_msgs_generate_messages_cpp
 )
 
+install(TARGETS ${PROJECT_NAME}_lib
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS ${PROJECT_NAME}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 install(
-  DIRECTORY include/
-  DESTINATION include/
+  DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
   FILES_MATCHING PATTERN "*.h"
+)
+
+install(DIRECTORY config launch yolo_network_config
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
 # Download yolov2-tiny.weights
 set(PATH "${CMAKE_CURRENT_SOURCE_DIR}/yolo_network_config/weights")
-# set(FILE "${PATH}/yolov2-tiny.weights")
-# message(STATUS "Checking and downloading yolov2-tiny.weights if needed ...")
-# if (NOT EXISTS "${FILE}")
-#   message(STATUS "... file does not exist. Downloading now ...")
-#   execute_process(COMMAND wget http://pjreddie.com/media/files/yolov2-tiny.weights -P ${PATH})
-# endif()
-
-# # Download yolov3.weights
-# set(FILE "${PATH}/yolov3.weights")
-# message(STATUS "Checking and downloading yolov3.weights if needed ...")
-# if (NOT EXISTS "${FILE}")
-#   message(STATUS "... file does not exist. Downloading now ...")
-#   execute_process(COMMAND wget http://pjreddie.com/media/files/yolov3.weights -P ${PATH})
-# endif()
-
-# # Download yolov4.weights
-set(FILE "${PATH}/yolov4.weights")
-message(STATUS "Checking and downloading yolov4.weights if needed ...")
+set(FILE "${PATH}/yolov2-tiny.weights")
+message(STATUS "Checking and downloading yolov2-tiny.weights if needed ...")
 if (NOT EXISTS "${FILE}")
   message(STATUS "... file does not exist. Downloading now ...")
-  execute_process(COMMAND wget -q https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v3_optimal/yolov4.weights -P ${PATH})
+  execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov2-tiny.weights -P ${PATH})
 endif()
 
-# Download yolov4-tiny.weights
-set(FILE "${PATH}/yolov4-tiny.weights")
-message(STATUS "Checking and downloading yolov4-tiny.weights if needed ...")
+# Download yolov3.weights
+set(FILE "${PATH}/yolov3.weights")
+message(STATUS "Checking and downloading yolov3.weights if needed ...")
 if (NOT EXISTS "${FILE}")
   message(STATUS "... file does not exist. Downloading now ...")
-  execute_process(COMMAND wget -q https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v4_pre/yolov4-tiny.weights -P ${PATH})
+  execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov3.weights -P ${PATH})
 endif()
 
 #Download yolov4.weights
@@ -378,13 +349,28 @@ endif()
 ## Testing ##
 #############
 
+if(CATKIN_ENABLE_TESTING)
+  # Download yolov2.weights
+  set(PATH "${CMAKE_CURRENT_SOURCE_DIR}/yolo_network_config/weights")
+  set(FILE "${PATH}/yolov2.weights")
+  message(STATUS "Checking and downloading yolov2.weights if needed ...")
+  if (NOT EXISTS "${FILE}")
+    message(STATUS "... file does not exist. Downloading now ...")
+    execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov2.weights -P ${PATH})
+  endif()
 
-install(DIRECTORY yolo_network_config/cfg yolo_network_config/weights DESTINATION share/${PROJECT_NAME}/yolo_network_config/)
-install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME}/)
+  find_package(rostest REQUIRED)
 
-#############
-## Testing ##
-#############
+  # Object detection in images.
+  add_rostest_gtest(${PROJECT_NAME}_object_detection-test
+    test/object_detection.test
+    test/test_main.cpp
+    test/ObjectDetection.cpp
+  )
+  target_link_libraries(${PROJECT_NAME}_object_detection-test
+    ${catkin_LIBRARIES}
+  )
+endif()
 
 #########################
 ###   CLANG TOOLING   ###
@@ -399,4 +385,3 @@ if (cmake_clang_tools_FOUND)
     CF_WERROR
   )
 endif (cmake_clang_tools_FOUND)
-

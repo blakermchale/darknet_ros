@@ -23,8 +23,8 @@ set(CMAKE_MODULE_PATH "${DARKNET_PATH}/cmake/Modules/" ${CMAKE_MODULE_PATH})
 # USER SETTINGS =================================================================
 
 set(CUDA_ENABLE ON)
-set(CUDNN_ENABLE OFF) #  set(CUDNN_ENABLE ON)
-set(FP16_ENABLE OFF)
+set(CUDNN_ENABLE ON) #  set(CUDNN_ENABLE ON)
+set(FP16_ENABLE ON)
 
 # Jetson AGX Xavier & TITAN V is under version of Turing. So, please set manually.
 # Turing or Ampere GPUs, FP16 is automatically enabled.
@@ -118,7 +118,6 @@ find_package(catkin REQUIRED
 )
 
 # Enable OPENCV in darknet
-add_definitions(-DOPENCV)
 add_definitions(-O4 -g)
 
 # Enable CUDNN in darknet
@@ -264,8 +263,10 @@ if (CUDA_FOUND)
 else()
 
   add_library(${PROJECT_NAME}_lib
-    ${PROJECT_LIB_FILES} ${DARKNET_CORE_FILES}
+    ${PROJECT_LIB_FILES}
+    ${DARKNET_CORE_FILES}
   )
+  target_compile_definitions(${PROJECT_NAME}_lib PRIVATE -DOPENCV)
 
   add_executable(${PROJECT_NAME}
     src/yolo_object_detector_node.cpp
@@ -286,10 +287,13 @@ target_link_libraries(${PROJECT_NAME}_lib
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
 )
+target_compile_definitions(${PROJECT_NAME}_lib PRIVATE -DOPENCV)
 
 target_link_libraries(${PROJECT_NAME}
   ${PROJECT_NAME}_lib
 )
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE -DOPENCV)
 
 # target_link_libraries(${PROJECT_NAME}_nodelet
 #   ${PROJECT_NAME}_lib

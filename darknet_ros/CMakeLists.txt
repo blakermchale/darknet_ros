@@ -2,17 +2,23 @@ cmake_minimum_required(VERSION 3.5.1)
 project(darknet_ros)
 
 # Set c++11 cmake flags
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_C_FLAGS "-Wall -Wno-unused-result -Wno-unknown-pragmas -Wno-unused-variable -Wfatal-errors -fPIC ${CMAKE_C_FLAGS}")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CMakeDependentOption)
 
-enable_language(C)
-enable_language(CXX)
+set(CMAKE_CXX_STANDARD 17)
 
-# Define path of darknet folder here.
-find_path(DARKNET_PATH
-  NAMES "README.md"
-  HINTS "${CMAKE_CURRENT_SOURCE_DIR}/../darknet/")
+# USER SETTINGS =================================================================
+
+set(CUDA_ENABLE OFF)
+set(CUDNN_ENABLE OFF) #  set(CUDNN_ENABLE ON)
+set(FP16_ENABLE OFF)
+
+# Jetson AGX Xavier & TITAN V is under version of Turing. So, please set manually.
+# Turing or Ampere GPUs, FP16 is automatically enabled.
+
+# set(CMAKE_CUDA_ARCHITECTURES 72)
+
+set(DARKNET_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../darknet)
+
 message(STATUS "Darknet path dir = ${DARKNET_PATH}")
 add_definitions(-DDARKNET_FILE_PATH="${DARKNET_PATH}")
 
@@ -20,20 +26,9 @@ add_definitions(-DDARKNET_FILE_PATH="${DARKNET_PATH}")
 set(CMAKE_MODULE_PATH "${DARKNET_PATH}/cmake/Modules/" ${CMAKE_MODULE_PATH})
 
 
-# USER SETTINGS =================================================================
-
-set(CUDA_ENABLE ON)
-set(CUDNN_ENABLE ON) #  set(CUDNN_ENABLE ON)
-set(FP16_ENABLE ON)
-
-# Jetson AGX Xavier & TITAN V is under version of Turing. So, please set manually.
-# Turing or Ampere GPUs, FP16 is automatically enabled.
-
-# set(CMAKE_CUDA_ARCHITECTURES 72)
-
 # Find CUDA ====================================================================
 if(CUDA_ENABLE)
-  find_package(CUDA REQUIRED)
+  find_package(CUDA)
 endif()
 
 if (CUDA_FOUND)
@@ -160,6 +155,9 @@ set(PROJECT_LIB_FILES
     src/YoloObjectDetector.cpp                    src/image_interface.cpp
     src/yolo_object_detector_node.cpp
 )
+
+# Log DARKNET_PATH
+message(STATUS "DARKNET_PATH: ${DARKNET_PATH}")
 
 set(DARKNET_CORE_FILES
     ${DARKNET_PATH}/src/activation_layer.c        ${DARKNET_PATH}/src/activations.c
@@ -330,22 +328,22 @@ install(DIRECTORY config launch yolo_network_config
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-# Download yolov2-tiny.weights
+# # Download yolov2-tiny.weights
 set(PATH "${CMAKE_CURRENT_SOURCE_DIR}/yolo_network_config/weights")
-set(FILE "${PATH}/yolov2-tiny.weights")
-message(STATUS "Checking and downloading yolov2-tiny.weights if needed ...")
-if (NOT EXISTS "${FILE}")
-  message(STATUS "... file does not exist. Downloading now ...")
-  execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov2-tiny.weights -P ${PATH})
-endif()
+# set(FILE "${PATH}/yolov2-tiny.weights")
+# message(STATUS "Checking and downloading yolov2-tiny.weights if needed ...")
+# if (NOT EXISTS "${FILE}")
+#   message(STATUS "... file does not exist. Downloading now ...")
+#   execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov2-tiny.weights -P ${PATH})
+# endif()
 
-# Download yolov3.weights
-set(FILE "${PATH}/yolov3.weights")
-message(STATUS "Checking and downloading yolov3.weights if needed ...")
-if (NOT EXISTS "${FILE}")
-  message(STATUS "... file does not exist. Downloading now ...")
-  execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov3.weights -P ${PATH})
-endif()
+# # Download yolov3.weights
+# set(FILE "${PATH}/yolov3.weights")
+# message(STATUS "Checking and downloading yolov3.weights if needed ...")
+# if (NOT EXISTS "${FILE}")
+#   message(STATUS "... file does not exist. Downloading now ...")
+#   execute_process(COMMAND wget -q https://github.com/leggedrobotics/darknet_ros/releases/download/1.1.4/yolov3.weights -P ${PATH})
+# endif()
 
 #Download yolov4.weights
 
@@ -357,9 +355,8 @@ if (NOT EXISTS "${FILE}")
 endif()
 
 #Download yolov4-tiny.weights
-
 set(FILE "${PATH}/yolov4-tiny.weights")
-message(STATUS "Checking and downloading yolov4.weights if needed ...")
+message(STATUS "Checking and downloading yolov4-tiny.weights if needed ...")
 if (NOT EXISTS "${FILE}")
   message(STATUS "... file does not exist. Downloading now ...")
   execute_process(COMMAND wget -q https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v4_pre/yolov4-tiny.weights -P ${PATH})

@@ -311,6 +311,7 @@ bool YoloObjectDetector::publishDetectionImage(const cv::Mat& detectionImage)
 {
   if (detectionImagePublisher_->get_subscription_count() < 1)
     return false;
+  generate_image_cp(buff_[(buffIndex_ + 1)%3], disp_);
   cv_bridge::CvImage cvImage;
   cvImage.header.stamp = this->now();
   cvImage.header.frame_id = "detection_image";
@@ -627,8 +628,6 @@ void YoloObjectDetector::yolo()
       demoTime_ = what_time_is_it_now();
       if (viewImage_) {
         displayInThread(0);
-      } else {
-        generate_image_cp(buff_[(buffIndex_ + 1)%3], disp_);
       }
       publishInThread();
     } else {
@@ -710,8 +709,9 @@ void *YoloObjectDetector::publishInThread()
         }
       }
     }
-    boundingBoxesResults_.header.stamp = this->now();
-    boundingBoxesResults_.header.frame_id = "detection";
+    // boundingBoxesResults_.header.stamp = this->now();
+    // boundingBoxesResults_.header.frame_id = "detection";
+    boundingBoxesResults_.header = headerBuff_[(buffIndex_ + 1) % 3];
     boundingBoxesResults_.image_header = headerBuff_[(buffIndex_ + 1) % 3];
     boundingBoxesPublisher_->publish(boundingBoxesResults_);
   } else {
